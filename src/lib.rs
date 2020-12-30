@@ -1,9 +1,51 @@
 //! Small library for `defer`ing the running of function until the end of a block.
-
+//!
+//! # Uasge
+//! Similar to the `defer` mechanism in Go, we can use this to defer the calling of functions
+//! ```
+//! fn do_something()
+//! {
+//!   let _guard = phantomdrop::defer(|| println!("Hello!"));
+//!   // do some work
+//! } // "Hello!" will now be printed when the function returns or unwinds (unless unwinds are disabled).
+//! ```
+//!
+//! The guard can also hold a value
+//! ```
+//! fn do_something(print: String)
+//! {
+//! # use phantomdrop::PhantomDrop;
+//!  let _guard = PhantomDrop::new(print, |string| println!("Dropped: {}", string));
+//!  // do some work
+//! } // `print` will now be printed here.
+//! ```
+//!
+//! Or capture a value, by reference, mutable reference, or moving.
+//! ```
+//! fn do_something(print: String)
+//! {
+//!  let _guard = phantomdrop::defer(move || println!("Dropped: {}", print)); // Moves `print` into itself.
+//!  // do some work
+//! } // `print` will now be printed here.
+//!
+//! fn do_something_by_reference(print: String)
+//! {
+//!  let _guard = phantomdrop::defer(|| println!("Dropped: {}", print)); // Holds an immutable reference to `print`.
+//!  let trimmed = print.trim(); // Can still be used
+//! } // `print` will now be printed here.
+//!
+//! fn do_something_by_mutable_reference(print: &mut String)
+//! {
+//!  let _guard = phantomdrop::defer(|| *print = String::from("Dropped")); // Holds a mutable reference to `print`.
+//! } // `print` will now be set to "Dropped" here.
+//! ```
 use core::mem::MaybeUninit;
 use core::ops::Drop;
 
 /// When dropped, the included function is ran with the argument held by the structure.
+///
+/// # Notes
+/// If both the function and the value are zero-sized (unique non-capturing closures are ZSTs), this wrapper will also be zero-sized.
 #[derive(Debug)]
 pub struct PhantomDrop<T, F: FnOnce(T)>(MaybeUninit<(T, F)>);
 
@@ -25,6 +67,13 @@ where F: FnOnce(())
 	PhantomDrop::new((), fun)
     }
 }
+
+/// Defer this function to run when the returned guard is dropped.
+pub fn defer(fun: impl FnOnce()) -> PhantomDrop<(), impl FnOnce(())>
+{
+    PhantomDrop::defer(move |_| fun())
+}
+
 impl<T, F> PhantomDrop<T,F>
 where F: FnOnce(T)
 {
@@ -55,6 +104,15 @@ where F: FnOnce(T)
 	unsafe { self.into_raw_parts() }.0
     }
 
+    /// Consume this instance without running the drop closure.
+    ///
+    /// # Notes
+    /// This largely has the same behaviour of `core::mem::forget`, however this method is preferable for instances of `PhantomDrop`, as it properly calls destructors for both its value and its function if needed.
+    #[inline] pub fn forget(self)
+    {
+	unsafe { self.into_raw_parts() };
+    }
+
     /// Get a mutable reference to the held type.
     #[inline] pub fn as_mut(&mut self) -> &mut T
     {
@@ -76,14 +134,14 @@ where F: FnOnce(T)
 
 impl<T: 'static> PhantomDrop<T, Box<dyn FnOnce(T)>>
 {
-    /// Box the closure in this instance.
+    /// Box the closure in this instance on to the heap.
     #[inline] pub fn boxed(self) -> PhantomDrop<T, Box<dyn FnOnce(T)>>
     {	
 	let (v, f) = unsafe { self.into_raw_parts() };
 	PhantomDrop::new(v, Box::new(f))
     }
 
-    /// Replace the function to be ran on drop with a no-op in place.
+    /// Replace the function to be ran on drop with a no-op in place on the heap.
     #[inline] pub fn neutralise_boxed(&mut self)
     {
 	unsafe { self.value_mut().1 = Box::new(drop) };
@@ -91,7 +149,7 @@ impl<T: 'static> PhantomDrop<T, Box<dyn FnOnce(T)>>
 }
 impl<T> PhantomDrop<T, fn (T)>
 {
-    /// Replace the function to be ran on drop with a no-op in place.
+    /// Replace the function to be ran on drop with a no-op in place with no allocations.
     #[inline] pub fn neutralise_in_place(&mut self)
     {
 	unsafe { self.value_mut().1 = drop };
@@ -106,5 +164,63 @@ where F: FnOnce(T)
     {
 	let (v, f) = unsafe { self.0.as_ptr().read() };
 	f(v);
+    }
+}
+
+#[cfg(test)]
+mod tests
+{
+    #[test]
+    fn zero_sized()
+    {
+	let guard = super::defer(|| println!("Hello world!"));
+	assert_eq!(core::mem::size_of_val(&guard), 0);
+    }
+    #[test]
+    fn mut_reference_holding()
+    {
+	let mut hi = String::from("Hello?");
+	let _guard = super::PhantomDrop::new(&mut hi, |string| {
+	    *string = String::from("Hello!");
+	    println!("{}", string);
+	});
+    }
+    #[test]
+    fn reference_holding()
+    {
+	let hi = String::from("Hello!");
+	let _guard = super::PhantomDrop::new(&hi, |string| println!("{}", string));
+    }
+    #[test]
+    fn value_holding()
+    {
+	let hi = String::from("Hello!");
+	let _guard = super::PhantomDrop::new(hi, |string| println!("{}", string));
+    }
+    #[test]
+    fn value_capturing()
+    {
+	let hi = String::from("Hello!");
+	let _guard = super::defer(move || println!("{}", hi));
+    }
+    #[test]
+    fn mut_reference_capturing()
+    {
+	let mut hi = String::from("Hello?");
+	let _guard = super::defer(|| {
+	    hi = String::from("Hello!");
+	    println!("{}", hi)
+	});
+    }
+    #[test]
+    fn reference_capturing()
+    {
+	let hi = String::from("Hello!");
+	let _guard = super::defer(|| println!("{}", hi));
+    }
+    #[test]
+    fn deferring()
+    {
+	let _guard = super::defer(|| println!("Hello!"));
     }
 }
