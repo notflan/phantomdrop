@@ -10,6 +10,8 @@
 //! } // "Hello!" will now be printed when the function returns or unwinds (unless unwinds are disabled).
 //! ```
 //!
+//! # Values
+//! 
 //! The guard can also hold a value
 //! ```
 //! fn do_something(print: String)
@@ -48,6 +50,12 @@ use core::ops::Drop;
 /// If both the function and the value are zero-sized (unique non-capturing closures are ZSTs), this wrapper will also be zero-sized.
 #[derive(Debug)]
 pub struct PhantomDrop<T, F: FnOnce(T)>(MaybeUninit<(T, F)>);
+
+/// `PhantomDrop` with no associated data.
+pub type PhantomDropEmpty<F> = PhantomDrop<(), F>;
+
+/// `PhantomDrop` that does not capture.
+pub type PhantomDropPure<T> = PhantomDrop<T, fn (T)>;
 
 impl<T: Clone, F: Clone + FnOnce(T)> Clone for PhantomDrop<T,F>
 {

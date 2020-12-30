@@ -2,7 +2,7 @@
 name = "phantomdrop"
 description = "Go-like deferring of function calls"
 keywords = ["defer", "drop", "go"]
-version = "1.0.0"
+version = "1.0.1"
 authors = ["Avril <flanchan@cumallover.me>"]
 edition = "2018"
 license = "GPL-3.0-or-later"
